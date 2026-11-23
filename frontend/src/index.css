@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme colors as "R G B" triplets so Tailwind can add opacity (bg-ember/20 etc.) */
+:root,
+[data-theme="dark"] {
+  color-scheme: dark;
+  --c-night: 11 15 30;
+  --c-panel: 18 24 48;
+  --c-raised: 26 33 64;
+  --c-line: 42 51 89;
+  --c-ink: 234 240 255;
+  --c-mute: 147 160 200;
+  --c-ember: 79 140 255;
+  --c-ember-dim: 59 116 230;
+  --c-iris: 168 85 247;
+  --c-glass: 34 211 238;
+  --c-danger: 252 165 165;
+}
+[data-theme="light"] {
+  color-scheme: light;
+  --c-night: 243 245 255;
+  --c-panel: 255 255 255;
+  --c-raised: 232 236 251;
+  --c-line: 211 218 240;
+  --c-ink: 18 26 51;
+  --c-mute: 90 102 144;
+  --c-ember: 37 99 235;
+  --c-ember-dim: 29 78 216;
+  --c-iris: 124 58 237;
+  --c-glass: 14 116 144;
+  --c-danger: 185 28 28;
+}
+
+@layer base {
+  body {
+    @apply font-sans text-ink antialiased;
+    background-color: rgb(var(--c-night));
+    background-image:
+      radial-gradient(900px 520px at 88% -8%, rgb(var(--c-ember) / 0.2), transparent 60%),
+      radial-gradient(700px 440px at -8% 8%, rgb(var(--c-iris) / 0.16), transparent 60%);
+    background-attachment: fixed;
+  }
+  h1, h2, h3 { @apply font-display tracking-tight; }
+  :focus-visible { @apply outline-none ring-2 ring-glass ring-offset-2 ring-offset-night; }
+  ::selection { background: rgb(var(--c-ember) / 0.35); }
+}
+
+@layer components {
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-5 py-2.5 text-sm font-semibold transition duration-200 disabled:cursor-not-allowed disabled:opacity-60; }
+  .btn-primary { @apply btn bg-gradient-to-r from-ember to-iris text-white shadow-lg shadow-ember/30 hover:brightness-110 hover:shadow-ember/40; }
+  .btn-ghost { @apply btn border border-line text-ink hover:border-ember/50 hover:bg-raised; }
+  .btn-danger { @apply btn border border-danger/40 text-danger hover:bg-danger/10; }
+  .input { @apply w-full rounded-lg border border-line bg-panel px-3.5 py-2.5 text-sm text-ink placeholder:text-mute/70 focus:border-ember focus:ring-2 focus:ring-ember/20; }
+  .surface { @apply rounded-2xl border border-line bg-panel/80 shadow-sm shadow-black/5 backdrop-blur; }
+  .card-hover { @apply transition duration-200 hover:-translate-y-0.5 hover:border-ember/50 hover:shadow-lg hover:shadow-ember/10; }
+  .text-gradient { @apply bg-gradient-to-r from-ember via-iris to-glass bg-clip-text text-transparent; }
+  .hero-glow { background: radial-gradient(circle, rgb(var(--c-ember) / 0.55) 0%, rgb(var(--c-iris) / 0.28) 45%, transparent 70%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+@keyframes ember-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.hero-in { animation: ember-in 0.7s ease-out both; }
+
+/* Slim scrollbars that follow the theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-mute) / 0.45) transparent;
+}
+@supports not (scrollbar-width: thin) {
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgb(var(--c-mute) / 0.45); border-radius: 9999px; border: 2px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-button { display: none; }
+}
+
+/* Keep chat bubbles off the scrollbar */
+[role="log"] { padding-right: 0.5rem; }
