@@ -38,7 +38,12 @@ export function getLLM(): AIProvider {
     embeddingModel: env.EMBEDDING_MODEL || undefined,
   };
   if (env.LLM_PROVIDER === "ollama") {
-    return new OpenAICompatibleProvider({ ...cfg, name: "ollama", baseUrl: cfg.baseUrl || "http://localhost:11434/v1" });
+    return new OpenAICompatibleProvider({
+      ...cfg,
+      name: "ollama",
+      baseUrl: cfg.baseUrl || "http://localhost:11434/v1",
+      stripThinkTags: true,
+    });
   }
   return env.LLM_PROVIDER === "huggingface" ? new HuggingFaceProvider(cfg) : new OpenRouterProvider(cfg);
 }

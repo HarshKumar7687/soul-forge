@@ -11,6 +11,7 @@ export interface ProviderConfig {
   maxTokens: number;
   temperature: number;
   embeddingModel?: string;
+  stripThinkTags?: boolean;
   extraHeaders?: Record<string, string>;
 }
 
@@ -49,6 +50,65 @@ function extractContent(json: unknown): string {
   const choice = (json as { choices?: { message?: { content?: unknown } }[] })?.choices?.[0];
   const content = choice?.message?.content;
   return typeof content === "string" ? content : "";
+}
+
+/** Removes Qwen-style thinking blocks without exposing them during streaming. */
+class ThinkBlockFilter {
+  private buffer = "";
+  private insideThink = false;
+  private started = false;
+
+  private appendVisible(text: string): string {
+    if (this.started) return text;
+    const trimmed = text.trimStart();
+    if (trimmed) this.started = true;
+    return trimmed;
+  }
+
+  push(chunk: string, final = false): string {
+    this.buffer += chunk;
+    let visible = "";
+
+    while (this.buffer) {
+      const marker = this.insideThink ? "</think>" : "<think>";
+      const markerIndex = this.buffer.toLowerCase().indexOf(marker);
+      if (markerIndex >= 0) {
+        const markerStart = !this.insideThink && this.buffer[markerIndex - 1] === "\\"
+          ? markerIndex - 1
+          : markerIndex;
+        if (!this.insideThink) visible += this.appendVisible(this.buffer.slice(0, markerStart));
+        this.buffer = this.buffer.slice(markerIndex + marker.length);
+        this.insideThink = !this.insideThink;
+        continue;
+      }
+
+      if (final) {
+        if (!this.insideThink) visible += this.appendVisible(this.buffer);
+        this.buffer = "";
+        break;
+      }
+
+      // Keep a possible partial marker for the next chunk.
+      let keep = 0;
+      const max = Math.min(marker.length - 1, this.buffer.length);
+      for (let size = max; size > 0; size--) {
+        if (this.buffer.slice(-size).toLowerCase() === marker.slice(0, size)) {
+          keep = size;
+          break;
+        }
+      }
+      const safeLength = this.buffer.length - keep;
+      if (!this.insideThink) visible += this.appendVisible(this.buffer.slice(0, safeLength));
+      this.buffer = this.buffer.slice(safeLength);
+      break;
+    }
+
+    return visible;
+  }
+}
+
+function stripThinkBlocks(text: string): string {
+  return new ThinkBlockFilter().push(text, true).trim();
 }
 
 /**
@@ -128,8 +188,9 @@ export class OpenAICompatibleProvider implements AIProvider {
     const { res, guard } = await this.open(messages, opts, false);
     try {
       const text = extractContent(await res.json().catch(() => null)).trim();
-      if (!text) throw new ProviderError("bad_response", "The model returned an empty reply. Try again.");
-      return text;
+      const output = this.cfg.stripThinkTags ? stripThinkBlocks(text) : text;
+      if (!output) throw new ProviderError("bad_response", "The model returned an empty reply. Try again.");
+      return output;
     } catch (e) {
       if (guard.timedOut) throw new ProviderError("timeout");
       throw e;
@@ -143,20 +204,23 @@ export class OpenAICompatibleProvider implements AIProvider {
       yield await this.complete(messages, opts);
       return;
     }
+    const thinkFilter = this.cfg.stripThinkTags ? new ThinkBlockFilter() : null;
     const { res, guard } = await this.open(messages, opts, true);
     const reader = res.body?.getReader();
     try {
       // Some models or providers ignore stream:true and return plain JSON.
       if (!reader || (res.headers.get("content-type") ?? "").includes("application/json")) {
         const text = extractContent(await res.json().catch(() => null)).trim();
-        if (!text) throw new ProviderError("bad_response", "The model returned an empty reply. Try again.");
-        yield text;
+        const output = thinkFilter ? stripThinkBlocks(text) : text;
+        if (!output) throw new ProviderError("bad_response", "The model returned an empty reply. Try again.");
+        yield output;
         return;
       }
       const decoder = new TextDecoder();
       let buffer = "";
       let emitted = false;
-      while (true) {
+      let finished = false;
+      while (!finished) {
         const { done, value } = await reader.read();
         if (done) break;
         guard.touch();
@@ -167,14 +231,20 @@ export class OpenAICompatibleProvider implements AIProvider {
           const line = raw.trim();
           if (!line.startsWith("data:")) continue; // comments and keep-alives
           const data = line.slice(5).trim();
-          if (data === "[DONE]") { if (!emitted) throw new ProviderError("bad_response", "The model returned an empty reply. Try again."); return; }
+          if (data === "[DONE]") { finished = true; break; }
           let json: { error?: unknown; choices?: { delta?: { content?: unknown } }[] };
           try { json = JSON.parse(data); } catch { continue; }
           if (json.error) throw new ProviderError("unavailable", "The AI provider stopped the reply unexpectedly. Try again.");
           const piece = json.choices?.[0]?.delta?.content;
-          if (typeof piece === "string" && piece) { emitted = true; yield piece; }
+          if (typeof piece === "string" && piece) {
+            const output = thinkFilter ? thinkFilter.push(piece) : piece;
+            if (output) { emitted = true; yield output; }
+          }
         }
+        if (finished) break;
       }
+      const tail = thinkFilter?.push("", true) ?? "";
+      if (tail) { emitted = true; yield tail; }
       if (!emitted) throw new ProviderError("bad_response", "The model returned an empty reply. Try again.");
     } catch (e) {
       if (e instanceof ProviderError) throw e;
